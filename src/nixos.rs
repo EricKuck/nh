@@ -6,7 +6,10 @@ use color_eyre::Result;
 use tracing::{debug, info};
 
 use crate::interface::NHRunnable;
+#[cfg(target_os = "linux")]
 use crate::interface::OsRebuildType::{self, Boot, Build, Switch, Test};
+#[cfg(target_os = "macos")]
+use crate::interface::OsRebuildType::{self, Build, Switch};
 use crate::interface::{self, OsRebuildArgs};
 use crate::util::{compare_semver, get_nix_version};
 use crate::*;
@@ -19,7 +22,10 @@ const SPEC_LOCATION: &str = "/etc/specialisation";
 impl NHRunnable for interface::OsArgs {
     fn run(&self) -> Result<()> {
         match &self.action {
+            #[cfg(target_os = "linux")]
             Switch(args) | Boot(args) | Test(args) | Build(args) => args.rebuild(&self.action),
+            #[cfg(target_os = "macos")]
+            Switch(args) | Build(args) => args.rebuild(&self.action),
             s => bail!("Subcommand {:?} not yet implemented", s),
         }
     }
@@ -42,8 +48,15 @@ impl OsRebuildArgs {
         debug!("out_dir: {:?}", out_dir);
         debug!("out_link {:?}", out_link);
 
+        #[cfg(target_os = "linux")]
         let flake_output = format!(
             "{}#nixosConfigurations.{:?}.config.system.build.toplevel",
+            &self.common.flakeref.deref(),
+            hostname
+        );
+        #[cfg(target_os = "macos")]
+        let flake_output = format!(
+            "{}#darwinConfigurations.{:?}.config.system.build.toplevel",
             &self.common.flakeref.deref(),
             hostname
         );
@@ -76,9 +89,14 @@ impl OsRebuildArgs {
                 .exec()?;
         }
 
+        #[cfg(target_os = "linux")]
+        let message = "Building NixOS configuration";
+        #[cfg(target_os = "macos")]
+        let message = "Building Darwin configuration";
+
         commands::BuildCommandBuilder::default()
             .flakeref(flake_output)
-            .message("Building NixOS configuration")
+            .message(message)
             .extra_args(["--out-link", out_link_str])
             .extra_args(&self.extra_args)
             .nom(!self.common.no_nom)
@@ -125,6 +143,7 @@ impl OsRebuildArgs {
             }
         }
 
+        #[cfg(target_os = "linux")]
         if let Test(_) | Switch(_) = rebuild_type {
             // !! Use the target profile aka spec-namespaced
             let switch_to_configuration =
@@ -138,10 +157,18 @@ impl OsRebuildArgs {
                 .exec()?;
         }
 
-        if let Boot(_) | Switch(_) = rebuild_type {
+        let activate = match rebuild_type {
+            Switch(_) => true,
+            #[cfg(target_os = "linux")]
+            Boot(_) => true,
+            _ => false,
+        };
+
+        if activate {
             commands::CommandBuilder::default()
                 .args([
                     "sudo",
+                    "-H",
                     "nix-env",
                     "--profile",
                     SYSTEM_PROFILE,
@@ -152,14 +179,38 @@ impl OsRebuildArgs {
                 .exec()?;
 
             // !! Use the base profile aka no spec-namespace
-            let switch_to_configuration = out_link.join("bin").join("switch-to-configuration");
-            let switch_to_configuration = switch_to_configuration.to_str().unwrap();
+            #[cfg(target_os = "linux")]
+            {
+                let switch_to_configuration = out_link.join("bin").join("switch-to-configuration");
+                let switch_to_configuration = switch_to_configuration.to_str().unwrap();
 
-            commands::CommandBuilder::default()
-                .args(["sudo", switch_to_configuration, "boot"])
-                .message("Adding configuration to bootloader")
-                .build()?
-                .exec()?;
+                commands::CommandBuilder::default()
+                    .args(["sudo", switch_to_configuration, "boot"])
+                    .message("Adding configuration to bootloader")
+                    .build()?
+                    .exec()?;
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                let activate_user = out_link.join("activate-user");
+                let activate_user = activate_user.to_str().unwrap();
+
+                commands::CommandBuilder::default()
+                    .args([activate_user])
+                    .message("Activating configuration for user")
+                    .build()?
+                    .exec()?;
+
+                let activate = out_link.join("activate");
+                let activate = activate.to_str().unwrap();
+
+                commands::CommandBuilder::default()
+                    .args(["sudo", activate])
+                    .message("Activating configuration")
+                    .build()?
+                    .exec()?;
+            }
         }
 
         // Drop the out dir *only* when we are finished

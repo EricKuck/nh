@@ -1,7 +1,6 @@
 mod clean;
 mod commands;
 mod completion;
-mod home;
 mod interface;
 mod logging;
 mod nixos;

@@ -61,7 +61,6 @@ pub trait NHRunnable {
 #[command(disable_help_subcommand = true)]
 pub enum NHCommand {
     Os(OsArgs),
-    Home(HomeArgs),
     Search(SearchArgs),
     Clean(CleanProxy),
     Completions(CompletionArgs),
@@ -71,7 +70,7 @@ pub enum NHCommand {
 #[clap(verbatim_doc_comment)]
 /// NixOS functionality
 ///
-/// Reimplementations of nixos-rebuild
+/// Reimplementations of nixos-rebuild and darwin-rebuild
 pub struct OsArgs {
     #[command(subcommand)]
     pub action: OsRebuildType,
@@ -81,8 +80,10 @@ pub struct OsArgs {
 pub enum OsRebuildType {
     /// Build and activate the new configuration, and make it the boot default
     Switch(OsRebuildArgs),
+    #[cfg(target_os = "linux")]
     /// Build the new configuration and make it the boot default
     Boot(OsRebuildArgs),
+    #[cfg(target_os = "linux")]
     /// Build and activate the new configuration
     Test(OsRebuildArgs),
     /// Build the new configuration

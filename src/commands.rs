@@ -62,28 +62,6 @@ impl Command {
 
         Ok(())
     }
-
-    pub fn exec_capture(&self) -> Result<Option<String>> {
-        let [head, tail @ ..] = &*self.args else {
-            bail!("Args was length 0");
-        };
-
-        let cmd = Exec::cmd(head)
-            .args(tail)
-            .stderr(Redirection::None)
-            .stdout(Redirection::Pipe);
-
-        if let Some(m) = &self.message {
-            info!("{}", m);
-        }
-        debug!(?cmd);
-
-        if !self.dry {
-            Ok(Some(cmd.capture()?.stdout_str()))
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 #[derive(Debug, derive_builder::Builder)]
