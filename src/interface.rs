@@ -185,6 +185,8 @@ pub enum CleanMode {
     User(CleanArgs),
     /// Cleans a specific profile
     Profile(CleanProfileArgs),
+    #[command(hide(true))]
+    AllWithRoot(CleanArgs),
 }
 
 #[derive(Args, Clone, Debug)]

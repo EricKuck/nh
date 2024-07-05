@@ -2,10 +2,12 @@ use std::{collections::HashMap, process::Stdio, time::Instant};
 
 use color_eyre::eyre::{eyre, Context, ContextCompat};
 use elasticsearch_dsl::*;
+use indexmap::indexmap;
 use interface::{FlakeRef, SearchArgs};
 use regex::Regex;
 use serde::Deserialize;
 use tracing::{debug, trace, warn};
+use crate::util::{print_header};
 
 use crate::*;
 
@@ -42,6 +44,39 @@ macro_rules! print_hyperlink {
 
 impl NHRunnable for SearchArgs {
     fn run(&self) -> Result<()> {
+        let url = "search.nixos.org";
+        let channel: String = match (&self.channel, &self.flake) {
+            (Some(c), _) => c.clone(),
+            (None, Some(f)) => {
+                let c = my_nix_branch(f);
+                match c {
+                    Ok(s) => s,
+                    Err(err) => {
+                        warn!(
+                            "Failed to read the nixpkgs input for the flake {}",
+                            f.as_str()
+                        );
+                        for e in err.chain() {
+                            warn!("{}", e);
+                        }
+                        String::from("nixos-unstable")
+                    }
+                }
+            }
+            (None, None) => {
+                debug!("Using default search channel");
+                String::from("nixos-unstable")
+            }
+        };
+
+        let table = indexmap! {
+            "url" => url.to_string(),
+            "query" => self.query.clone(),
+            "channel" => channel.to_string(),
+            "limit" => format!("{}", self.limit),
+        };
+        print_header("nix search", table);
+
         trace!("args: {self:?}");
 
         let nixpkgs_path = std::thread::spawn(|| {
@@ -88,32 +123,6 @@ impl NHRunnable for SearchArgs {
             ),
         );
 
-        let channel: String = match (&self.channel, &self.flake) {
-            (Some(c), _) => c.clone(),
-            (None, Some(f)) => {
-                let c = my_nix_branch(f);
-                match c {
-                    Ok(s) => s,
-                    Err(err) => {
-                        warn!(
-                            "Failed to read the nixpkgs input for the flake {}",
-                            f.as_str()
-                        );
-                        for e in err.chain() {
-                            warn!("{}", e);
-                        }
-                        String::from("nixos-unstable")
-                    }
-                }
-            }
-            (None, None) => {
-                debug!("Using default search channel");
-                String::from("nixos-unstable")
-            }
-        };
-        debug!(?channel);
-
-        println!("Querying search.nixos.org, with channel {}...", channel);
         let then = Instant::now();
 
         let client = reqwest::blocking::Client::new();
@@ -121,8 +130,9 @@ impl NHRunnable for SearchArgs {
             // I guess 42 is the version of the backend API
             // TODO: have a GH action or something check if they updated this thing
             .post(format!(
-                "https://search.nixos.org/backend/latest-42-{}/_search",
-                channel
+                "https://{}/backend/latest-42-{}/_search",
+                url,
+                channel,
             ))
             .json(&query)
             .header("User-Agent", format!("nh/{}", crate::NH_VERSION))

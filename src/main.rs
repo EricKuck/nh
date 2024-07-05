@@ -10,7 +10,6 @@ mod util;
 use crate::interface::NHParser;
 use crate::interface::NHRunnable;
 use color_eyre::Result;
-use tracing::debug;
 
 const NH_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -20,14 +19,4 @@ fn main() -> Result<()> {
     tracing::debug!(?args);
 
     args.command.run()
-}
-
-fn self_elevate() -> ! {
-    use std::os::unix::process::CommandExt;
-
-    let mut cmd = std::process::Command::new("sudo");
-    cmd.args(std::env::args());
-    debug!("{:?}", cmd);
-    let err = cmd.exec();
-    panic!("{}", err);
 }

@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
-
 use crate::*;
 use color_eyre::eyre::{bail, eyre, Context, ContextCompat};
 use nix::errno::Errno;
@@ -12,9 +11,13 @@ use nix::{
     fcntl::AtFlags,
     unistd::{faccessat, AccessFlags},
 };
+use indexmap::{indexmap, IndexMap};
+use prettytable::{row, Table};
 use regex::Regex;
 use tracing::{debug, info, instrument, span, warn, Level};
 use uzers::os::unix::UserExt;
+use crate::interface::CleanArgs;
+use crate::util::{print_header};
 
 // Nix impl:
 // https://github.com/NixOS/nix/blob/master/src/nix-collect-garbage/nix-collect-garbage.cc
@@ -38,8 +41,28 @@ impl NHRunnable for interface::CleanMode {
         let now = SystemTime::now();
         let mut is_profile_clean = false;
 
+        let header = match self {
+            interface::CleanMode::Profile(args) => Some((
+                "Clean Profile",
+                args_to_table(&args.common, Some(args.profile.to_str().unwrap())),
+            )),
+            interface::CleanMode::All(args) => Some((
+                "Clean All",
+                args_to_table(args, None),
+            )),
+            interface::CleanMode::User(args) => Some((
+                "Clean User",
+                args_to_table(args, None),
+            )),
+            interface::CleanMode::AllWithRoot(_) => None,
+        };
+        if let Some((title, table)) = header {
+            print_header(title, table);
+        }
+
         // What profiles to clean depending on the call mode
         let uid = nix::unistd::Uid::effective();
+
         let args = match self {
             interface::CleanMode::Profile(args) => {
                 profiles.push(args.profile.clone());
@@ -48,27 +71,26 @@ impl NHRunnable for interface::CleanMode {
             }
             interface::CleanMode::All(args) => {
                 if !uid.is_root() {
-                    crate::self_elevate();
-                }
-                profiles.extend(profiles_in_dir("/nix/var/nix/profiles"));
-                for read_dir in PathBuf::from("/nix/var/nix/profiles/per-user").read_dir()? {
-                    let path = read_dir?.path();
-                    profiles.extend(profiles_in_dir(path));
-                }
-                #[cfg(target_os = "linux")]
-                let start_uid = 1000;
-                #[cfg(target_os = "macos")]
-                let start_uid = 501;
-                let end_uid = start_uid + 100;
-                debug!("Scanning XDG profiles for users 0, ${start_uid}-${end_uid}");
-                for user in unsafe { uzers::all_users() } {
-                    if user.uid() >= start_uid && user.uid() < end_uid || user.uid() == 0 {
-                        debug!(?user, "Adding XDG profiles for user");
-                        profiles.extend(profiles_in_dir(
-                            user.home_dir().join(".local/state/nix/profiles"),
-                        ));
+                    use std::os::unix::process::CommandExt;
+
+                    let mut cmd = std::process::Command::new("sudo");
+                    let args = std::env::args();
+                    for arg in args {
+                        if arg == "all" {
+                            cmd.arg("all-with-root");
+                        } else {
+                            cmd.arg(arg);
+                        }
                     }
+                    debug!("{:?}", cmd);
+                    let err = cmd.exec();
+                    panic!("{}", err);
                 }
+                profiles = clean_all_as_root(profiles.clone()).unwrap();
+                args
+            }
+            interface::CleanMode::AllWithRoot(args) => {
+                profiles = clean_all_as_root(profiles.clone()).unwrap();
                 args
             }
             interface::CleanMode::User(args) => {
@@ -163,13 +185,11 @@ impl NHRunnable for interface::CleanMode {
         // Present the user the information about the paths to clean
         use owo_colors::OwoColorize;
         println!();
-        println!("{}", "Welcome to nh clean".bold());
-        println!("Keeping {} generation(s)", args.keep.green());
-        println!("Keeping paths newer than {}", args.keep_since.green());
-        println!();
-        println!("legend:");
-        println!("{}: path to be kept", "OK".green());
-        println!("{}: path to be removed", "DEL".red());
+        let mut table = Table::new();
+        table.set_titles(row!["Legend"]);
+        table.add_row(row!["OK".green(), "path to be kept"]);
+        table.add_row(row!["DEL".red(), "path to be removed"]);
+        table.printstd();
         println!();
         if !gcroots_tagged.is_empty() {
             println!(
@@ -235,6 +255,29 @@ impl NHRunnable for interface::CleanMode {
 
         Ok(())
     }
+}
+
+fn clean_all_as_root(mut profiles: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
+    profiles.extend(profiles_in_dir("/nix/var/nix/profiles"));
+    for read_dir in PathBuf::from("/nix/var/nix/profiles/per-user").read_dir()? {
+        let path = read_dir?.path();
+        profiles.extend(profiles_in_dir(path));
+    }
+    #[cfg(target_os = "linux")]
+    let start_uid = 1000;
+    #[cfg(target_os = "macos")]
+    let start_uid = 501;
+    let end_uid = start_uid + 100;
+    debug!("Scanning XDG profiles for users 0, ${start_uid}-${end_uid}");
+    for user in unsafe { uzers::all_users() } {
+        if user.uid() >= start_uid && user.uid() < end_uid || user.uid() == 0 {
+            debug!(?user, "Adding XDG profiles for user");
+            profiles.extend(profiles_in_dir(
+                user.home_dir().join(".local/state/nix/profiles"),
+            ));
+        }
+    }
+    return Ok(profiles)
 }
 
 #[instrument(ret, level = "debug")]
@@ -347,4 +390,18 @@ fn remove_path_nofail(path: &Path) {
     if let Err(err) = std::fs::remove_file(path) {
         warn!(?path, ?err, "Failed to remove path");
     }
+}
+
+fn args_to_table<'a>(args: &'a CleanArgs, profile: Option<&str>) -> IndexMap<&'a str, String> {
+    let mut map = indexmap! {
+            "keep at least" => format!("{keep} generations", keep = args.keep.to_string()),
+            "keep since at least" => args.keep_since.to_string(),
+            "dry-run" => args.dry.to_string(),
+        };
+
+    if let Some(profile) = profile {
+        map.insert("profile", profile.to_string());
+    }
+
+    return map;
 }

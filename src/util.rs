@@ -1,10 +1,15 @@
 extern crate semver;
 
+use std::ffi::OsStr;
 use color_eyre::{eyre, Result};
 use semver::Version;
 
 use std::process::Command;
 use std::str;
+use indexmap::IndexMap;
+use subprocess::{Exec, Redirection};
+
+use prettytable::{Table, row};
 
 /// Compares two semantic versions and returns their order.
 ///
@@ -55,4 +60,61 @@ pub fn get_nix_version() -> Result<String> {
     }
 
     Err(eyre::eyre!("Failed to extract version"))
+}
+
+pub fn print_header(title: &str, map: IndexMap<&str, String>) {
+    let mut header = Exec::cmd("figlet")
+        .args(&["-w", "220", "-f", "Banner3-D", &format!(" {title} ")])
+        .stdout(Redirection::Pipe)
+        .stderr(Redirection::Pipe)
+        .capture()
+        .expect("figlet output")
+        .stdout_str();
+
+    let mut table = Table::new();
+    table.set_titles(row!["Option", "Value"]);
+    for (k, v) in map {
+        table.add_row(row![k, v]);
+    }
+    let mut table = table.to_string();
+
+    let header_line_length = first_line_length(&header);
+    let table_line_length = first_line_length(&table);
+    let section_length_diff: isize = header_line_length as isize - table_line_length as isize;
+    if section_length_diff > 0 {
+        table = pad_string_lines(&table, table_line_length + (section_length_diff / 2) as usize)
+    } else {
+        header = pad_string_lines(&header, header_line_length + (-section_length_diff / 2) as usize)
+    }
+
+    lolcatify("echo", &[&format!("\n{header}\n{table}\n")]);
+}
+
+fn first_line_length(str: &str) -> usize {
+    return if let Some(pos) = str.find('\n') {
+        str[..pos].chars().count()
+    } else {
+        str.chars().count()
+    };
+}
+
+fn pad_string_lines(str: &str, padding: usize) -> String {
+    let help = str
+        .lines()
+        .map(|line| format!("{:>width$}", line, width = padding))
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    return help;
+}
+
+fn lolcatify(cmd: &str, args: &[impl AsRef<OsStr>]) {
+    _ = {
+        Exec::cmd(cmd)
+            .args(args)
+            .stdout(Redirection::Pipe)
+            .stderr(Redirection::Merge)
+            | Exec::cmd("lolcat")
+    }
+        .join();
 }

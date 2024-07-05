@@ -3,6 +3,8 @@ use std::ops::Deref;
 use color_eyre::eyre::{bail, Context};
 use color_eyre::Result;
 
+use indexmap::indexmap;
+
 use tracing::{debug, info};
 
 use crate::interface::NHRunnable;
@@ -11,7 +13,7 @@ use crate::interface::OsRebuildType::{self, Boot, Build, Switch, Test};
 #[cfg(target_os = "macos")]
 use crate::interface::OsRebuildType::{self, Build, Switch};
 use crate::interface::{self, OsRebuildArgs};
-use crate::util::{compare_semver, get_nix_version};
+use crate::util::{compare_semver, get_nix_version, print_header};
 use crate::*;
 
 const SYSTEM_PROFILE: &str = "/nix/var/nix/profiles/system";
@@ -33,6 +35,16 @@ impl NHRunnable for interface::OsArgs {
 
 impl OsRebuildArgs {
     pub fn rebuild(&self, rebuild_type: &OsRebuildType) -> Result<()> {
+        match rebuild_type {
+            Switch(args) => self.print_header("switch", args),
+            #[cfg(target_os = "linux")]
+            Boot(args) => self.print_header("boot", args),
+            #[cfg(target_os = "linux")]
+            Test(args) => self.print_header("test", args),
+            Build(args) => self.print_header("build", args),
+            _ => info!("Unknown command")
+        }
+
         if nix::unistd::Uid::effective().is_root() {
             bail!("Don't run nh os as root. I will call sudo internally as needed");
         }
@@ -217,5 +229,15 @@ impl OsRebuildArgs {
         drop(out_dir);
 
         Ok(())
+    }
+
+    fn print_header(&self, title: &str, args: &OsRebuildArgs) {
+        let map = indexmap! {
+            "flake" => args.common.flakeref.to_string(),
+            "dry-run" => args.common.dry.to_string(),
+            "update" => args.common.update.to_string(),
+        };
+
+        print_header(&format!("Nix {title}"), map);
     }
 }
