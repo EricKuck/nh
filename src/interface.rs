@@ -156,16 +156,12 @@ pub struct SearchArgs {
     /// Number of search results to display
     pub limit: u64,
 
-    #[arg(long, short)]
+    #[arg(long, short, default_value = "nixos-unstable")]
     /// Name of the channel to query (e.g nixos-23.11, nixos-unstable)
-    pub channel: Option<String>,
+    pub channel: String,
 
     /// Name of the package to search
     pub query: String,
-
-    #[arg(short, long, env = "FLAKE", value_hint = clap::ValueHint::DirPath)]
-    /// Flake to read what nixpkgs channels to search for
-    pub flake: Option<FlakeRef>,
 }
 
 // Needed a struct to have multiple sub-subcommands
