@@ -2,7 +2,6 @@ use std::ops::Deref;
 
 use color_eyre::eyre::{bail, Context};
 use color_eyre::Result;
-
 use indexmap::indexmap;
 
 use tracing::{debug, info};
@@ -235,6 +234,7 @@ impl OsRebuildArgs {
         let map = indexmap! {
             "flake" => args.common.flakeref.to_string(),
             "dry-run" => args.common.dry.to_string(),
+            "hostname" => args.hostname.clone().unwrap_or(hostname::get().unwrap()).into_string().unwrap(),
             "update" => args.common.update.to_string(),
         };
 

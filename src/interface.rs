@@ -99,7 +99,7 @@ pub struct OsRebuildArgs {
     pub common: CommonRebuildArgs,
 
     /// Output to choose from the flakeref. Hostname is used by default
-    #[arg(long, short = 'H', global = true)]
+    #[arg(env = "FLAKE_HOST", long, short = 'H', global = true)]
     pub hostname: Option<OsString>,
 
     /// Name of the specialisation
@@ -222,51 +222,6 @@ pub struct CleanProfileArgs {
     pub common: CleanArgs,
 
     pub profile: PathBuf,
-}
-
-#[derive(Debug, Args)]
-/// Home-manager functionality
-pub struct HomeArgs {
-    #[command(subcommand)]
-    pub subcommand: HomeSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum HomeSubcommand {
-    #[clap(verbatim_doc_comment)]
-    /// Build and activate a home-manager configuration
-    ///
-    /// Will check the current $USER and $(hostname) to determine which output to build, unless -c is passed
-    Switch(HomeRebuildArgs),
-
-    #[clap(verbatim_doc_comment)]
-    /// Build a home-manager configuration
-    ///
-    /// Will check the current $USER and $(hostname) to determine which output to build, unless -c is passed
-    Build(HomeRebuildArgs),
-
-    /// Show an overview of the installation
-    #[command(hide(true))]
-    Info,
-}
-
-#[derive(Debug, Args)]
-#[clap(verbatim_doc_comment)]
-pub struct HomeRebuildArgs {
-    #[command(flatten)]
-    pub common: CommonRebuildArgs,
-
-    /// Name of the flake homeConfigurations attribute, like username@hostname
-    #[arg(long, short)]
-    pub configuration: Option<String>,
-
-    /// Extra arguments passed to nix build
-    #[arg(last = true)]
-    pub extra_args: Vec<String>,
-
-    /// Move existing files by backing up with the extension
-    #[arg(long, short = 'b')]
-    pub backup_extension: Option<String>,
 }
 
 #[derive(Debug, Parser)]
